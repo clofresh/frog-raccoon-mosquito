@@ -48,6 +48,7 @@ function love.load()
         img = love.graphics.newImage('img/frog.png'),
         ox = 30,
         oy = 40,
+        sy = 1,
     }
     frog.fixture = love.physics.newFixture(frog.body, frog.shape)
     frog.fixture:setSensor(true)
@@ -64,10 +65,12 @@ function love.load()
     end
     function frog.jump:charging(dt)
         self.chargeTimer = self.chargeTimer + dt
+        frog.sy = math.max(0.75, frog.sy - dt/5)
         if not love.keyboard.isDown(' ') and frog.grounded then
             self.co = jumpCoroutine(frog, math.min(self.chargeTimer * 500, 500))
             self.state = self.jumping
             self.airTime = 0
+            frog.sy = 1
         end
     end
     function frog.jump:jumping(dt)
@@ -279,7 +282,7 @@ function love.draw()
 
     -- frog
     local x, y = frog.body:getPosition()
-    love.graphics.draw(frog.img, x, y, 0, frog.dir, 1, frog.ox, frog.oy)
+    love.graphics.draw(frog.img, x, y, 0, frog.dir, frog.sy, frog.ox, frog.oy)
     -- love.graphics.setColor(0, 255, 0)
     -- love.graphics.circle('line', x, y, frog.shape:getRadius())
 
