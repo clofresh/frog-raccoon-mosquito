@@ -5,6 +5,7 @@ love.window.setMode(WIDTH, HEIGHT)
 
 world = nil
 ground = nil
+playerControl = nil
 
 function jumpCoroutine(obj, height)
     local initalSpeed = -math.sqrt(2 * GRAVITY * height)
@@ -39,6 +40,7 @@ function love.load()
     world = love.physics.newWorld(0, 0, false)
     love.physics.setMeter(PPM)
     frog = {
+        type = 'frog',
         body = love.physics.newBody(world, 20, 100, 'dynamic'),
         shape = love.physics.newCircleShape(20),
         speed = 80,
@@ -53,20 +55,34 @@ function love.load()
     frog.fixture = love.physics.newFixture(frog.body, frog.shape)
     frog.fixture:setSensor(true)
     frog.fixture:setUserData(frog)
-    frog.jump = {airTime = 0}
+    frog.jump = {
+        airTime = 0,
+        readyCooldown = 0,
+    }
     function frog.jump:update(dt)
         self.state(self, dt)
     end
     function frog.jump:ready(dt)
-        if love.keyboard.isDown(' ') and frog.grounded then
+        if self.readyCooldown >= 0 then
+            self.readyCooldown = math.max(0, self.readyCooldown - dt)
+        end
+        if frog.grounded and
+            (playerControl == frog and love.keyboard.isDown(' ')) or
+            (playerControl ~= frog and self.readyCooldown <= 0)
+        then
             self.state = self.charging
             self.chargeTimer = 0
+            if playerControl ~= frog then
+                self.chargeDuration = math.random(1, 10) / 10.0
+            end
         end
     end
     function frog.jump:charging(dt)
         self.chargeTimer = self.chargeTimer + dt
         frog.sy = math.max(0.75, frog.sy - dt/5)
-        if not love.keyboard.isDown(' ') and frog.grounded then
+        if frog.grounded and
+            (playerControl == frog and not love.keyboard.isDown(' ')) or
+            (playerControl ~= frog and self.chargeTimer >= self.chargeDuration) then
             self.co = jumpCoroutine(frog, math.min(self.chargeTimer * 500, 500))
             self.state = self.jumping
             self.airTime = 0
@@ -79,6 +95,14 @@ function love.load()
             frog.body:setLinearVelocity(0, 0)
             self.state = self.ready
             self.co = nil
+            if playerControl ~= frog then
+                self.readyCooldown = math.random(0, 10) / 10.0
+                if math.random() > 0.5 then
+                    frog.dir = 1
+                else
+                    frog.dir = -1
+                end
+            end
         else
             coroutine.resume(self.co, dt)
         end
@@ -87,14 +111,24 @@ function love.load()
     frog.jump.state = frog.jump.jumping
     function frog:startCollision(myFixture, otherFixture, contact)
         local other = otherFixture:getUserData()
-        if other.type == 'mosquito' then
+        if other and other.type == 'mosquito' then
             other.eaten = true
         end
     end
 
     mosquitoes = {}
+    for i = 1, 10 do
+        table.insert(mosquitoes, newMosquito())
+    end
     mosquitoSpawnCooldown = 0
     mosquitoBatch = love.graphics.newSpriteBatch(love.graphics.newImage('img/mosquito.png'))
+
+    racoons = {}
+    for i = 1, 3 do
+        table.insert(racoons, newRacoon())
+    end
+    racoonSpawnCooldown = 0
+    racoonBatch = love.graphics.newSpriteBatch(love.graphics.newImage('img/racoon.png'))
 
     ground = {
         body = love.physics.newBody(world, 0, 585, 'static'),
@@ -108,6 +142,24 @@ function love.load()
     local imgWidth = ground.img:getWidth()
     for i = 0, 9 do
         ground.batch:add(i * imgWidth, 0)
+    end
+
+    boundaries = {
+        {
+            type = 'boundary',
+            body = love.physics.newBody(world, 0, 0, 'static'),
+            shape = love.physics.newRectangleShape(200, 2048),
+        },
+        {
+            type = 'boundary',
+            body = love.physics.newBody(world, 1948, 0, 'static'),
+            shape = love.physics.newRectangleShape(200, 2048),
+        },
+    }
+    for i, b in pairs(boundaries) do
+        b.fixture = love.physics.newFixture(b.body, b.shape)
+        b.fixture:setSensor(true)
+        b.fixture:setUserData(b)
     end
 
     water = {
@@ -162,23 +214,166 @@ function love.load()
     world:setCallbacks(function(fixtureA, fixtureB, contact)
         local objA = fixtureA:getUserData() 
         local objB = fixtureB:getUserData()
-        if objA.startCollision then
+        if objA and objA.startCollision then
             objA:startCollision(fixtureA, fixtureB, contact)
         end
-        if objB.startCollision then
+        if objB and objB.startCollision then
             objB:startCollision(fixtureB, fixtureA, contact)
         end
     end,
     function(fixtureA, fixtureB, contact)
         local objA = fixtureA:getUserData()
         local objB = fixtureB:getUserData()
-        if objA.endCollision then
+        if objA and objA.endCollision then
             objA:endCollision(fixtureA, fixtureB, contact)
         end
-        if objB.endCollision then
+        if objB and objB.endCollision then
             objB:endCollision(fixtureB, fixtureA, contact)
         end
     end)
+
+    switchControl(frog)
+end
+
+function newMosquito()
+    local mosquito = {
+        type = 'mosquito',
+        body = love.physics.newBody(world, math.random(100, 1948), math.random(100, 500), 'dynamic'),
+        shape = love.physics.newCircleShape(10),
+        r = 0,
+        speed = {
+            x = 500,
+            y = 200,
+        }
+    }
+    mosquito.fixture = love.physics.newFixture(mosquito.body, mosquito.shape)
+    mosquito.fixture:setUserData(mosquito)
+    mosquito.fixture:setSensor(true)
+    return mosquito
+end
+
+racoonHunting = {}
+function racoonHunting.hunting(racoon, dt)
+    if racoon.huntingCo then
+        if coroutine.status(racoon.huntingCo) == 'dead' then
+            racoon.huntingCo = nil
+            racoon.state = racoonHunting.movingOpen
+            if playerControl ~= racoon then
+                racoon.body:setLinearVelocity(racoon.dir * 100, 0)
+            end
+        else
+            coroutine.resume(racoon.huntingCo, dt)
+        end
+    else
+        racoon.huntingCo = coroutine.create(function()
+            local dt
+            local x, y = racoon.body:getPosition()
+            local lx, ly = unpack(racoon.lastSeen)
+            local timer = 0
+            racoon.claws = {x, y, lx, ly}
+            while timer < 0.25 do
+                dt = coroutine.yield()
+                timer = timer + dt
+
+            end
+            world:rayCast(x, y, lx, ly,
+                function(fixture, x, y, xn, yn, fraction)
+                    if fixture == racoon.fixture then
+                        return -1
+                    else
+                        local obj = fixture:getUserData() or {}
+                        if obj.type == 'frog' then
+                            print('hit frog!')
+                            if playerControl == frog then
+                                switchControl(racoon)
+                            elseif playerControl == racoon then
+                                switchControl(frog)
+                            end
+                            frog.jump.readyCooldown = 0
+                            return 0
+                        end
+                    end
+                    return -1
+                end)
+            racoon.claws = nil
+            timer = 0
+            while timer < 0.25 do
+                dt = coroutine.yield()
+                timer = timer + dt
+            end
+        end)
+    end
+end
+
+function racoonHunting.enteringStealth()
+end
+
+function racoonHunting.exitingStealth()
+end
+
+function racoonHunting.movingStealth()
+end
+
+function racoonHunting.movingOpen(racoon, dt)
+    local x, y = racoon.body:getPosition()
+    if playerControl == racoon then
+        if love.keyboard.isDown('a', 'd') then
+            if love.keyboard.isDown('a') then
+                racoon.dir = -1
+            else
+                racoon.dir = 1
+            end
+            racoon.body:setLinearVelocity(racoon.dir * 100, 0)
+        else
+            if love.keyboard.isDown(' ') then
+                racoon.state = racoonHunting.hunting
+                racoon.lastSeen = {x + racoon.dir * 50, y + 60}
+            end
+            racoon.body:setLinearVelocity(0, 0)
+        end
+    else
+        world:rayCast(x, y, x + racoon.dir * 50, y + 60,
+            function(fixture, x, y, xn, yn, fraction)
+                if fixture == racoon.fixture then
+                    return -1
+                else
+                    local obj = fixture:getUserData() or {}
+                    if obj.type == 'boundary' then
+                        racoon.dir = racoon.dir * -1
+                        racoon.body:setLinearVelocity(racoon.dir * 100, 0)
+                        return 0
+                    elseif obj.type == 'frog' then
+                        racoon.state = racoonHunting.hunting
+                        racoon.body:setLinearVelocity(0, 0)
+                        racoon.lastSeen = {obj.body:getPosition()}
+                        return 0
+                    else
+                        return -1
+                    end
+                end
+            end)
+    end
+end
+
+function newRacoon()
+    local racoon = {
+        type = 'racoon',
+        body = love.physics.newBody(world, math.random(100, 1948), 510, 'dynamic'),
+        shape = love.physics.newCircleShape(30),
+        dir = 1,
+        ox = 64,
+        oy = 86,
+    }
+    racoon.fixture = love.physics.newFixture(racoon.body, racoon.shape)
+    racoon.fixture:setUserData(racoon)
+    racoon.fixture:setSensor(true)
+    racoon.state = racoonHunting.movingOpen
+    racoon.body:setLinearVelocity(racoon.dir * 100, 0)
+    return racoon
+end
+
+function switchControl(obj)
+    playerControl = obj
 end
 
 function love.update(dt)
@@ -187,19 +382,7 @@ function love.update(dt)
     end
     if #mosquitoes < 20 and mosquitoSpawnCooldown <= 0 then
         mosquitoSpawnCooldown = 1.0
-        local mosquito = {
-            type = 'mosquito',
-            body = love.physics.newBody(world, math.random(100, 1948), math.random(100, 500), 'dynamic'),
-            shape = love.physics.newCircleShape(10),
-            r = 0,
-            speed = {
-                x = 500,
-                y = 200,
-            }
-        }
-        mosquito.fixture = love.physics.newFixture(mosquito.body, mosquito.shape)
-        mosquito.fixture:setUserData(mosquito)
-        table.insert(mosquitoes, mosquito)
+        table.insert(mosquitoes, newMosquito())
     end
     local newMosquitoes = {}
     mosquitoBatch:clear()
@@ -208,24 +391,46 @@ function love.update(dt)
             mosquito.body:setLinearVelocity(math.random(-mosquito.speed.x, mosquito.speed.x) * math.cos(mosquito.r), math.random(-mosquito.speed.y, mosquito.speed.y) * math.sin(mosquito.r))
             mosquito.r = mosquito.r + math.pi * dt
             local x, y = mosquito.body:getPosition()
+            if y > 510 then
+                y = 510
+                mosquito.body:setPosition(x, y)
+            end
             mosquitoBatch:add(x, y, 0, 1, 1, 8, 6)
             table.insert(newMosquitoes, mosquito)
         end
     end
     mosquitoes = newMosquitoes
 
+    local newRacoons = {}
+    racoonBatch:clear()
+    for i, racoon in pairs(racoons) do
+        if not racoon.eaten then
+            racoon.state(racoon, dt)
+            local x, y = racoon.body:getPosition()
+            racoonBatch:add(x, y, 0, racoon.dir, 1, racoon.ox, racoon.oy)
+            table.insert(newRacoons, racoon)
+            if playerControl == racoon then
+                cx = math.max(math.min(0, WIDTH / 2 - x), WIDTH - 2048)
+                cy = math.max(HEIGHT / 2 - y, 0)
+            end
+        end
+    end
+    racoons = newRacoons
+
     frog.jump:update(dt)
-    if love.keyboard.isDown('a', 'd') then
-        if love.keyboard.isDown('a') then
-            frog.dir = -1
-        elseif love.keyboard.isDown('d') then
-            frog.dir = 1
+    if playerControl == frog then
+        if love.keyboard.isDown('a', 'd') then
+            if love.keyboard.isDown('a') then
+                frog.dir = -1
+            elseif love.keyboard.isDown('d') then
+                frog.dir = 1
+            end
         end
     end
     if frog.croakCooldown > 0 then
         frog.croakCooldown = math.max(0, frog.croakCooldown - dt)
     end
-    if love.keyboard.isDown('r') and frog.croakCooldown <= 0 and frog.grounded then
+    if playerControl == frog and love.keyboard.isDown('r') and frog.croakCooldown <= 0 and frog.grounded then
         frog.croakCooldown = 0.5
         love.audio.rewind(sounds.ribbit)
         love.audio.play(sounds.ribbit)
@@ -242,8 +447,11 @@ function love.update(dt)
         frog.jump.state = frog.jump.jumping
         frog.jump.co = jumpCoroutine(frog, 0)
     end
-    cx = math.max(math.min(0, WIDTH / 2 - x), WIDTH - 2048)
-    cy = math.max(HEIGHT / 2 - y, 0)
+
+    if playerControl == frog then
+        cx = math.max(math.min(0, WIDTH / 2 - x), WIDTH - 2048)
+        cy = math.max(HEIGHT / 2 - y, 0)
+    end
 
     local newSplashes = {}
     for i, splash in pairs(water.splashes) do
@@ -270,6 +478,21 @@ function love.draw()
     -- love.graphics.polygon('fill', wx, wy, water.body:getWorldPoints(water.shape:getPoints()))
     love.graphics.draw(water.batch, water.body:getPosition())
 
+    -- racoons
+    love.graphics.draw(racoonBatch)
+    love.graphics.setColor(0, 0, 0)
+    for i, racoon in pairs(racoons) do
+        local x, y = racoon.body:getPosition()
+        love.graphics.circle('line', x, y, racoon.shape:getRadius())
+        love.graphics.line(x, y, x + racoon.dir * 50, y + 60)
+        if racoon.claws then
+            love.graphics.setColor(255, 0, 0)
+            love.graphics.line(unpack(racoon.claws))
+            love.graphics.setColor(0, 0, 0)
+        end
+    end
+    love.graphics.setColor(255, 255, 255)
+
     -- mosquitoes
     love.graphics.draw(mosquitoBatch)
     -- love.graphics.setColor(0, 0, 0)
@@ -283,8 +506,8 @@ function love.draw()
     -- frog
     local x, y = frog.body:getPosition()
     love.graphics.draw(frog.img, x, y, 0, frog.dir, frog.sy, frog.ox, frog.oy)
-    -- love.graphics.setColor(0, 255, 0)
-    -- love.graphics.circle('line', x, y, frog.shape:getRadius())
+    love.graphics.setColor(0, 255, 0)
+    love.graphics.circle('line', x, y, frog.shape:getRadius())
 
 
     -- ground
@@ -299,5 +522,11 @@ function love.draw()
 
     for i, splash in pairs(water.splashes) do
         love.graphics.draw(splash)
+    end
+
+    love.graphics.setColor(0, 0, 0)
+    for i, b in pairs(boundaries) do
+        local x, y = b.body:getPosition()
+        love.graphics.polygon('line', x, y, b.body:getWorldPoints(b.shape:getPoints()))
     end
 end
