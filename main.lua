@@ -101,12 +101,27 @@ function love.load()
     water = {
         body = love.physics.newBody(world, 0, 550, 'static'),
         shape = love.physics.newPolygonShape(0, 0, 2048, 0, 2048, 400, 0, 400),
-        color = {38, 166, 141}
+        color = {38, 166, 141},
+        img = love.graphics.newImage('img/water.png'),
+        splashes = {},
     }
     water.body:setFixedRotation(true)
     water.fixture = love.physics.newFixture(water.body, water.shape)
     water.fixture:setUserData(water)
     water.fixture:setSensor(true)
+    water.batch = love.graphics.newSpriteBatch(water.img)
+    local imgWidth = water.img:getWidth()
+    for i = 0, 9 do
+        water.batch:add(i * imgWidth, 0)
+    end
+    water.particleSystem = love.graphics.newParticleSystem(love.graphics.newImage('img/drop.png'), 20)
+    water.particleSystem:setEmitterLifetime(0.25)
+    water.particleSystem:setEmissionRate(100)
+    water.particleSystem:setAreaSpread('normal', 10, 5)
+    water.particleSystem:setColors(255, 255, 255, 255, 255, 255, 255, 0)
+    water.particleSystem:setParticleLifetime(0.25)
+    water.particleSystem:setSizes(0.25, 0.5, 0)
+    water.particleSystem:setSizeVariation(0.5)
 
     sky = {
         img = love.graphics.newImage('img/sky.png')
@@ -117,37 +132,41 @@ function love.load()
         sky.batch:add(i * imgWidth - (i), 0)
     end
 
-    -- function frog:startCollision(myFixture, otherFixture, contact)
-    --     if otherFixture == ground.fixture then
-    --         frog.grounded = true
-    --     end
-    -- end
-    -- function frog:endCollision(myFixture, otherFixture, contact)
-    --     if otherFixture == ground.fixture then
-    --         frog.grounded = false
-    --     end
-    -- end
+    function water:startCollision(myFixture, otherFixture, contact)
+        local splash = water.particleSystem:clone()
+        splash:setPosition(otherFixture:getBody():getX(), water.body:getY())
+        splash:setLinearAcceleration(0, 0, 0, 800)
+        splash:start()
+        table.insert(water.splashes, splash)
+    end
+    function water:endCollision(myFixture, otherFixture, contact)
+        local splash = water.particleSystem:clone()
+        splash:setPosition(otherFixture:getBody():getX(), water.body:getY())
+        splash:setLinearAcceleration(0, -800, 0, 0)
+        splash:start()
+        table.insert(water.splashes, splash)
+    end
 
-    -- world:setCallbacks(function(fixtureA, fixtureB, contact)
-    --     local objA = fixtureA:getUserData() 
-    --     local objB = fixtureB:getUserData()
-    --     if objA.startCollision then
-    --         objA:startCollision(fixtureA, fixtureB, contact)
-    --     end
-    --     if objB.startCollision then
-    --         objB:startCollision(fixtureB, fixtureA, contact)
-    --     end
-    -- end,
-    -- function(fixtureA, fixtureB, contact)
-    --     local objA = fixtureA:getUserData()
-    --     local objB = fixtureB:getUserData()
-    --     if objA.endCollision then
-    --         objA:endCollision(fixtureA, fixtureB, contact)
-    --     end
-    --     if objB.endCollision then
-    --         objB:endCollision(fixtureB, fixtureA, contact)
-    --     end
-    -- end)
+    world:setCallbacks(function(fixtureA, fixtureB, contact)
+        local objA = fixtureA:getUserData() 
+        local objB = fixtureB:getUserData()
+        if objA.startCollision then
+            objA:startCollision(fixtureA, fixtureB, contact)
+        end
+        if objB.startCollision then
+            objB:startCollision(fixtureB, fixtureA, contact)
+        end
+    end,
+    function(fixtureA, fixtureB, contact)
+        local objA = fixtureA:getUserData()
+        local objB = fixtureB:getUserData()
+        if objA.endCollision then
+            objA:endCollision(fixtureA, fixtureB, contact)
+        end
+        if objB.endCollision then
+            objB:endCollision(fixtureB, fixtureA, contact)
+        end
+    end)
 end
 
 function love.update(dt)
@@ -181,6 +200,15 @@ function love.update(dt)
     end
     cx = math.max(math.min(0, WIDTH / 2 - x), WIDTH - 2048)
     cy = math.max(HEIGHT / 2 - y, 0)
+
+    local newSplashes = {}
+    for i, splash in pairs(water.splashes) do
+        splash:update(dt)
+        if splash:isActive() then
+            table.insert(newSplashes, splash)
+        end
+    end
+
     world:update(dt)
 end
 
@@ -193,9 +221,10 @@ function love.draw()
     love.graphics.draw(sky.batch, 0, 768 - 1500)
 
     -- water
-    love.graphics.setColor(water.color)
-    local wx, wy = water.body:getPosition()
-    love.graphics.polygon('fill', wx, wy, water.body:getWorldPoints(water.shape:getPoints()))
+    -- love.graphics.setColor(water.color)
+    -- local wx, wy = water.body:getPosition()
+    -- love.graphics.polygon('fill', wx, wy, water.body:getWorldPoints(water.shape:getPoints()))
+    love.graphics.draw(water.batch, water.body:getPosition())
 
     -- frog
     local x, y = frog.body:getPosition()
@@ -213,4 +242,8 @@ function love.draw()
     -- love.graphics.polygon('line', gx, gy, ground.body:getWorldPoints(ground.shape:getPoints()))
 
     -- love.graphics.line(rx1, ry1, rx2, ry2)
+
+    for i, splash in pairs(water.splashes) do
+        love.graphics.draw(splash)
+    end
 end
