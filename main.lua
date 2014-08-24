@@ -169,8 +169,15 @@ function love.update(dt)
     end
     local x, y = frog.body:getPosition()
     local newX
-    if x < 0 or x > 2048 then
-        frog.body:setPosition(math.min(math.max(0, x), 2048), y)
+    if x < 0 or x > 2040 then
+        x = math.min(math.max(0, x), 2040)
+        frog.body:setPosition(x, y)
+    end
+    if y > HEIGHT then
+        frog.body:setPosition(x, 100)
+        frog.body:setLinearVelocity(0, 0)
+        frog.jump.state = frog.jump.jumping
+        frog.jump.co = jumpCoroutine(frog, 0)
     end
     cx = math.max(math.min(0, WIDTH / 2 - x), WIDTH - 2048)
     cy = math.max(HEIGHT / 2 - y, 0)
