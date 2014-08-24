@@ -82,7 +82,16 @@ function love.load()
     end
     frog.jump.co = jumpCoroutine(frog, 0)
     frog.jump.state = frog.jump.jumping
+    function frog:startCollision(myFixture, otherFixture, contact)
+        local other = otherFixture:getUserData()
+        if other.type == 'mosquito' then
+            other.eaten = true
+        end
+    end
 
+    mosquitoes = {}
+    mosquitoSpawnCooldown = 0
+    mosquitoBatch = love.graphics.newSpriteBatch(love.graphics.newImage('img/mosquito.png'))
 
     ground = {
         body = love.physics.newBody(world, 0, 585, 'static'),
@@ -170,6 +179,38 @@ function love.load()
 end
 
 function love.update(dt)
+    if mosquitoSpawnCooldown > 0 then
+        mosquitoSpawnCooldown = math.max(0, mosquitoSpawnCooldown - dt)
+    end
+    if #mosquitoes < 20 and mosquitoSpawnCooldown <= 0 then
+        mosquitoSpawnCooldown = 1.0
+        local mosquito = {
+            type = 'mosquito',
+            body = love.physics.newBody(world, math.random(100, 1948), math.random(100, 500), 'dynamic'),
+            shape = love.physics.newCircleShape(10),
+            r = 0,
+            speed = {
+                x = 500,
+                y = 200,
+            }
+        }
+        mosquito.fixture = love.physics.newFixture(mosquito.body, mosquito.shape)
+        mosquito.fixture:setUserData(mosquito)
+        table.insert(mosquitoes, mosquito)
+    end
+    local newMosquitoes = {}
+    mosquitoBatch:clear()
+    for i, mosquito in pairs(mosquitoes) do
+        if not mosquito.eaten then
+            mosquito.body:setLinearVelocity(math.random(-mosquito.speed.x, mosquito.speed.x) * math.cos(mosquito.r), math.random(-mosquito.speed.y, mosquito.speed.y) * math.sin(mosquito.r))
+            mosquito.r = mosquito.r + math.pi * dt
+            local x, y = mosquito.body:getPosition()
+            mosquitoBatch:add(x, y, 0, 1, 1, 8, 6)
+            table.insert(newMosquitoes, mosquito)
+        end
+    end
+    mosquitoes = newMosquitoes
+
     frog.jump:update(dt)
     if love.keyboard.isDown('a', 'd') then
         if love.keyboard.isDown('a') then
@@ -225,6 +266,16 @@ function love.draw()
     -- local wx, wy = water.body:getPosition()
     -- love.graphics.polygon('fill', wx, wy, water.body:getWorldPoints(water.shape:getPoints()))
     love.graphics.draw(water.batch, water.body:getPosition())
+
+    -- mosquitoes
+    love.graphics.draw(mosquitoBatch)
+    -- love.graphics.setColor(0, 0, 0)
+    -- for i, mosquito in pairs(mosquitoes) do
+    --     local x, y = mosquito.body:getPosition()
+    --     love.graphics.circle('line', x, y, mosquito.shape:getRadius())
+    -- end
+    -- love.graphics.setColor(255, 255, 255)
+
 
     -- frog
     local x, y = frog.body:getPosition()
