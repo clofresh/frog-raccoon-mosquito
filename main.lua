@@ -140,6 +140,7 @@ function love.load()
     mosquitoSpawnCooldown = 0
     mosquitoBatch = love.graphics.newSpriteBatch(love.graphics.newImage('img/mosquito.png'))
 
+    clawBatch = love.graphics.newSpriteBatch(love.graphics.newImage('img/claws.png'))
     racoons = {}
     for i = 1, 3 do
         table.insert(racoons, newRacoon())
@@ -517,6 +518,7 @@ function love.update(dt)
 
     local newRacoons = {}
     racoonBatch:clear()
+    clawBatch:clear()
     for i, racoon in pairs(racoons) do
         if racoon.eaten then
             racoon.fixture:destroy()
@@ -533,6 +535,10 @@ function love.update(dt)
             if playerControl == racoon then
                 cx = math.max(math.min(0, WIDTH / 2 - x), WIDTH - 2048)
                 cy = math.max(HEIGHT / 2 - y, 0)
+            end
+            if racoon.claws then
+                local x1, y1, x2, y2 = unpack(racoon.claws)
+                clawBatch:add((x1 + x2) / 2, (y1 + y2) / 2, 0, 1, 1, 30, 24)
             end
         end
     end
@@ -608,18 +614,19 @@ function love.draw()
 
     -- racoons
     love.graphics.draw(racoonBatch)
-    love.graphics.setColor(0, 0, 0)
-    for i, racoon in pairs(racoons) do
-        local x, y = racoon.body:getPosition()
-        -- love.graphics.circle('line', x, y, racoon.shape:getRadius())
-        -- love.graphics.line(x, y, x + racoon.dir * 50, y + 60)
-        if racoon.claws then
-            love.graphics.setColor(255, 0, 0)
-            love.graphics.line(unpack(racoon.claws))
-            love.graphics.setColor(0, 0, 0)
-        end
-    end
-    love.graphics.setColor(255, 255, 255)
+    -- love.graphics.setColor(0, 0, 0)
+    -- for i, racoon in pairs(racoons) do
+    --     local x, y = racoon.body:getPosition()
+    --     -- love.graphics.circle('line', x, y, racoon.shape:getRadius())
+    --     -- love.graphics.line(x, y, x + racoon.dir * 50, y + 60)
+    --     if racoon.claws then
+    --         love.graphics.setColor(255, 0, 0)
+    --         love.graphics.line(unpack(racoon.claws))
+    --         love.graphics.setColor(0, 0, 0)
+    --     end
+    -- end
+    -- love.graphics.setColor(255, 255, 255)
+    love.graphics.draw(clawBatch)
 
     -- mosquitoes
     love.graphics.draw(mosquitoBatch)
