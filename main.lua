@@ -256,7 +256,7 @@ mosquitoFlying = {}
 
 function mosquitoStartCollision(self, meFixture, otherFixture, contact)
     local otherObj = otherFixture:getUserData()
-    if otherObj and otherObj.type == 'racoon' and math.random() > 0.9 then
+    if otherObj and otherObj.type == 'racoon' and not otherObj.stealth then
         otherObj.eaten = true
         if playerControl == otherObj then
             switchControl(self)
@@ -337,6 +337,7 @@ function racoonHunting.hunting(racoon, dt)
         if coroutine.status(racoon.huntingCo) == 'dead' then
             racoon.huntingCo = nil
             racoon.state = racoonHunting.movingOpen
+            racoon.stealth = true
             if playerControl ~= racoon then
                 racoon.body:setLinearVelocity(racoon.dir * 100, 0)
             end
@@ -370,6 +371,7 @@ function racoonHunting.hunting(racoon, dt)
                             end
                             frog.eaten = true
                             frog.jump.readyCooldown = 0
+                            racoon.stealth = true
                             racoon.lastSeen = nil
                             racoon.huntingCo = nil
                             racoon.state = racoonHunting.movingOpen
@@ -412,6 +414,7 @@ function racoonHunting.movingOpen(racoon, dt)
             racoon.body:setLinearVelocity(racoon.dir * 100, 0)
         else
             if love.keyboard.isDown(' ') then
+                racoon.stealth = false
                 racoon.state = racoonHunting.hunting
                 racoon.lastSeen = {x + racoon.dir * 50, y + 60}
             end
@@ -429,6 +432,7 @@ function racoonHunting.movingOpen(racoon, dt)
                         racoon.body:setLinearVelocity(racoon.dir * 100, 0)
                         return 0
                     elseif obj.type == 'frog' then
+                        racoon.stealth = false
                         racoon.state = racoonHunting.hunting
                         racoon.body:setLinearVelocity(0, 0)
                         racoon.lastSeen = {obj.body:getPosition()}
@@ -449,6 +453,7 @@ function newRacoon()
         dir = 1,
         ox = 64,
         oy = 86,
+        stealth = true,
     }
     racoon.fixture = love.physics.newFixture(racoon.body, racoon.shape)
     racoon.fixture:setUserData(racoon)
@@ -466,7 +471,7 @@ function love.update(dt)
     if mosquitoSpawnCooldown > 0 then
         mosquitoSpawnCooldown = math.max(0, mosquitoSpawnCooldown - dt)
     end
-    if #mosquitoes < 5 and mosquitoSpawnCooldown <= 0 then
+    if #mosquitoes < 20 and mosquitoSpawnCooldown <= 0 then
         mosquitoSpawnCooldown = 1.0
         table.insert(mosquitoes, newMosquito())
     end
@@ -518,6 +523,11 @@ function love.update(dt)
         else
             racoon.state(racoon, dt)
             local x, y = racoon.body:getPosition()
+            if racoon.stealth then
+                racoonBatch:setColor(255, 255, 255, 64)
+            else
+                racoonBatch:setColor()
+            end
             racoonBatch:add(x, y, 0, racoon.dir, 1, racoon.ox, racoon.oy)
             table.insert(newRacoons, racoon)
             if playerControl == racoon then
