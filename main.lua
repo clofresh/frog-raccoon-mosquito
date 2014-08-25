@@ -339,8 +339,10 @@ function racoonHunting.hunting(racoon, dt)
             racoon.huntingCo = nil
             racoon.state = racoonHunting.movingOpen
             racoon.stealth = true
+            racoon.speed = 100
+            racoon.stealthCooldown = 0
             if playerControl ~= racoon then
-                racoon.body:setLinearVelocity(racoon.dir * 100, 0)
+                racoon.body:setLinearVelocity(racoon.dir * racoon.speed, 0)
             end
         else
             coroutine.resume(racoon.huntingCo, dt)
@@ -373,11 +375,13 @@ function racoonHunting.hunting(racoon, dt)
                             frog.eaten = true
                             frog.jump.readyCooldown = 0
                             racoon.stealth = true
+                            racoon.stealthCooldown = 0
+                            racoon.speed = 100
                             racoon.lastSeen = nil
                             racoon.huntingCo = nil
                             racoon.state = racoonHunting.movingOpen
                             if playerControl ~= racoon then
-                                racoon.body:setLinearVelocity(racoon.dir * 100, 0)
+                                racoon.body:setLinearVelocity(racoon.dir * racoon.speed, 0)
                             end
                             return 0
                         end
@@ -412,16 +416,39 @@ function racoonHunting.movingOpen(racoon, dt)
             else
                 racoon.dir = 1
             end
-            racoon.body:setLinearVelocity(racoon.dir * 100, 0)
+            local speed
+            racoon.body:setLinearVelocity(racoon.dir * racoon.speed, 0)
         else
             if love.keyboard.isDown(' ') then
                 racoon.stealth = false
+                racoon.speed = 350
                 racoon.state = racoonHunting.hunting
                 racoon.lastSeen = {x + racoon.dir * 50, y + 60}
+            elseif love.keyboard.isDown('w') then
+                racoon.stealth = true
+                racoon.speed = 100
+            elseif love.keyboard.isDown('s') then
+                racoon.stealth = false
+                racoon.speed = 350
             end
             racoon.body:setLinearVelocity(0, 0)
         end
     else
+        if racoon.stealthCooldown > 0 then
+            racoon.stealthCooldown = math.max(0, racoon.stealthCooldown - dt)
+        else
+            if math.random() > 0.9 then
+                racoon.stealth = not racoon.stealth
+                if racoon.steath then
+                    racoon.speed = 100
+                else
+                    racoon.speed = 350
+                end
+                racoon.body:setLinearVelocity(racoon.dir * racoon.speed, 0)
+            end
+            racoon.stealthCooldown = math.random(1, 3)
+        end
+
         world:rayCast(x, y, x + racoon.dir * 50, y + 60,
             function(fixture, x, y, xn, yn, fraction)
                 if fixture == racoon.fixture then
@@ -430,10 +457,12 @@ function racoonHunting.movingOpen(racoon, dt)
                     local obj = fixture:getUserData() or {}
                     if obj.type == 'boundary' then
                         racoon.dir = racoon.dir * -1
-                        racoon.body:setLinearVelocity(racoon.dir * 100, 0)
+                        racoon.body:setLinearVelocity(racoon.dir * racoon.speed, 0)
                         return 0
                     elseif obj.type == 'frog' then
                         racoon.stealth = false
+                        racoon.speed = 350
+                        racoon.stealthCooldown = 0
                         racoon.state = racoonHunting.hunting
                         racoon.body:setLinearVelocity(0, 0)
                         racoon.lastSeen = {obj.body:getPosition()}
@@ -454,13 +483,15 @@ function newRacoon()
         dir = 1,
         ox = 64,
         oy = 86,
+        speed = 100,
         stealth = true,
+        stealthCooldown = 0,
     }
     racoon.fixture = love.physics.newFixture(racoon.body, racoon.shape)
     racoon.fixture:setUserData(racoon)
     racoon.fixture:setSensor(true)
     racoon.state = racoonHunting.movingOpen
-    racoon.body:setLinearVelocity(racoon.dir * 100, 0)
+    racoon.body:setLinearVelocity(racoon.dir * racoon.speed, 0)
     return racoon
 end
 
@@ -472,7 +503,7 @@ function love.update(dt)
     if mosquitoSpawnCooldown > 0 then
         mosquitoSpawnCooldown = math.max(0, mosquitoSpawnCooldown - dt)
     end
-    if #mosquitoes < 20 and mosquitoSpawnCooldown <= 0 then
+    if #mosquitoes < 5 and mosquitoSpawnCooldown <= 0 then
         mosquitoSpawnCooldown = 1.0
         table.insert(mosquitoes, newMosquito())
     end
