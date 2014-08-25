@@ -32,14 +32,8 @@ function jumpCoroutine(obj, height)
     end)
 end
 
-function love.load()
-    sounds = {
-        ribbit = love.audio.newSource('audio/ribbit.ogg')
-    }
-
-    world = love.physics.newWorld(0, 0, false)
-    love.physics.setMeter(PPM)
-    frog = {
+function newFrog()
+    local frog = {
         type = 'frog',
         body = love.physics.newBody(world, 20, 100, 'dynamic'),
         shape = love.physics.newCircleShape(20),
@@ -113,8 +107,31 @@ function love.load()
         local other = otherFixture:getUserData()
         if other and other.type == 'mosquito' then
             other.eaten = true
+            if playerControl == other then
+                print('eaten by the frog')
+                switchControl(frog)
+            elseif playerControl == frog then
+                print('ate a mosquito')
+                score.mosquitoes = score.mosquitoes + 1
+            end
         end
     end
+    return frog
+end
+
+function love.load()
+    score = {
+        frogs = 0,
+        racoons = 0,
+        mosquitoes = 0,
+    }
+    sounds = {
+        ribbit = love.audio.newSource('audio/ribbit.ogg')
+    }
+
+    world = love.physics.newWorld(0, 0, false)
+    love.physics.setMeter(PPM)
+    frog = newFrog()
 
     mosquitoes = {}
     for i = 1, 10 do
@@ -235,6 +252,20 @@ function love.load()
     switchControl(frog)
 end
 
+mosquitoFlying = {}
+
+function mosquitoStartCollision(self, meFixture, otherFixture, contact)
+    local otherObj = otherFixture:getUserData()
+    if otherObj and otherObj.type == 'racoon' and math.random() > 0.9 then
+        otherObj.eaten = true
+        if playerControl == otherObj then
+            switchControl(self)
+        elseif playerControl == self then
+            score.racoons = score.racoons + 1
+        end
+    end
+end
+
 function newMosquito()
     local mosquito = {
         type = 'mosquito',
@@ -244,12 +275,60 @@ function newMosquito()
         speed = {
             x = 500,
             y = 200,
-        }
+        },
+        state = mosquitoFlying.idle
     }
     mosquito.fixture = love.physics.newFixture(mosquito.body, mosquito.shape)
     mosquito.fixture:setUserData(mosquito)
     mosquito.fixture:setSensor(true)
+    mosquito.flyCooldown = math.random(10, 20) / 10.0
+    mosquito.startCollision = mosquitoStartCollision
     return mosquito
+end
+
+function mosquitoFlying.idle(mosquito, dt)
+    if (playerControl ~= mosquito and mosquito.flyCooldown > 0) or
+    (playerControl == mosquito and not love.keyboard.isDown(' ')) then
+        mosquito.flyCooldown = math.max(0, mosquito.flyCooldown - dt)
+        mosquito.body:setLinearVelocity(math.random(-mosquito.speed.x, mosquito.speed.x) * math.cos(mosquito.r), math.random(-mosquito.speed.y, mosquito.speed.y) * math.sin(mosquito.r))
+        mosquito.r = mosquito.r + math.pi * dt
+    elseif (playerControl ~= mosquito and mosquito.flyCooldown <= 0) or
+        (playerControl == mosquito and love.keyboard.isDown(' ')) then
+        mosquito.state = mosquitoFlying.fly
+        local speed = 1000
+        if playerControl == mosquito then
+            local dx = 0
+            local dy = 0
+            if love.keyboard.isDown('a') then
+                dx = -1
+            elseif love.keyboard.isDown('d') then
+                dx = 1
+            end
+            if love.keyboard.isDown('w') then
+                dy = -1
+            elseif love.keyboard.isDown('s') then
+                dy = 1
+            end
+            mosquito.r = math.atan2(dy, dx)
+        else
+            if mosquito.body:getY() < 500 then
+                mosquito.r = math.random(0, math.pi*100)/100.0
+            else
+                mosquito.r = math.pi + math.random(0, math.pi*100)/100.0
+            end
+        end
+        mosquito.body:setLinearVelocity(speed * math.cos(mosquito.r), speed * math.sin(mosquito.r))
+        mosquito.flyCooldown = math.random(10, 20) / 10.0
+    end
+end
+
+function mosquitoFlying.fly(mosquito, dt)
+    if mosquito.flyCooldown > 0 then
+        mosquito.flyCooldown = math.max(0, mosquito.flyCooldown - dt)
+    else
+        mosquito.state = mosquitoFlying.idle
+        mosquito.flyCooldown = math.random(10, 20) / 10.0
+    end
 end
 
 racoonHunting = {}
@@ -287,9 +366,16 @@ function racoonHunting.hunting(racoon, dt)
                             if playerControl == frog then
                                 switchControl(racoon)
                             elseif playerControl == racoon then
-                                switchControl(frog)
+                                score.frogs = score.frogs + 1
                             end
+                            frog.eaten = true
                             frog.jump.readyCooldown = 0
+                            racoon.lastSeen = nil
+                            racoon.huntingCo = nil
+                            racoon.state = racoonHunting.movingOpen
+                            if playerControl ~= racoon then
+                                racoon.body:setLinearVelocity(racoon.dir * 100, 0)
+                            end
                             return 0
                         end
                     end
@@ -380,31 +466,56 @@ function love.update(dt)
     if mosquitoSpawnCooldown > 0 then
         mosquitoSpawnCooldown = math.max(0, mosquitoSpawnCooldown - dt)
     end
-    if #mosquitoes < 20 and mosquitoSpawnCooldown <= 0 then
+    if #mosquitoes < 5 and mosquitoSpawnCooldown <= 0 then
         mosquitoSpawnCooldown = 1.0
         table.insert(mosquitoes, newMosquito())
     end
     local newMosquitoes = {}
     mosquitoBatch:clear()
     for i, mosquito in pairs(mosquitoes) do
-        if not mosquito.eaten then
-            mosquito.body:setLinearVelocity(math.random(-mosquito.speed.x, mosquito.speed.x) * math.cos(mosquito.r), math.random(-mosquito.speed.y, mosquito.speed.y) * math.sin(mosquito.r))
-            mosquito.r = mosquito.r + math.pi * dt
+        if mosquito.eaten then
+            mosquito.fixture:destroy()
+        else
+            mosquito.state(mosquito, dt)
             local x, y = mosquito.body:getPosition()
-            if y > 510 then
-                y = 510
-                mosquito.body:setPosition(x, y)
+            local newX, newY
+            if x < 0 or x > 2048 then
+                newX = math.min(math.max(0, x), 2048)
+                x = newX
+            end
+            if y < 0 or y > 510 then
+                newY = math.min(math.max(0, y), 510)
+                y = newY
+            end
+            if newX or newY then
+                mosquito.body:setPosition(newX or x, newY or y)
             end
             mosquitoBatch:add(x, y, 0, 1, 1, 8, 6)
+
+            if playerControl == mosquito then
+                cx = math.max(math.min(0, WIDTH / 2 - x), WIDTH - 2048)
+                cy = math.max(HEIGHT / 2 - y, 0)
+            end
+
             table.insert(newMosquitoes, mosquito)
         end
     end
     mosquitoes = newMosquitoes
 
+    if racoonSpawnCooldown > 0 then
+        racoonSpawnCooldown = math.max(0, racoonSpawnCooldown - dt)
+    end
+    if #racoons < 3 and racoonSpawnCooldown <= 0 then
+        racoonSpawnCooldown = 5.0
+        table.insert(racoons, newRacoon())
+    end
+
     local newRacoons = {}
     racoonBatch:clear()
     for i, racoon in pairs(racoons) do
-        if not racoon.eaten then
+        if racoon.eaten then
+            racoon.fixture:destroy()
+        else
             racoon.state(racoon, dt)
             local x, y = racoon.body:getPosition()
             racoonBatch:add(x, y, 0, racoon.dir, 1, racoon.ox, racoon.oy)
@@ -416,6 +527,11 @@ function love.update(dt)
         end
     end
     racoons = newRacoons
+
+    if frog.eaten then
+        frog.fixture:destroy()
+        frog = newFrog()
+    end
 
     frog.jump:update(dt)
     if playerControl == frog then
@@ -466,6 +582,8 @@ end
 
 function love.draw()
     love.graphics.setBackgroundColor(1, 52, 103)
+
+    love.graphics.push()
     love.graphics.translate(cx, cy)
 
     -- sky
@@ -483,8 +601,8 @@ function love.draw()
     love.graphics.setColor(0, 0, 0)
     for i, racoon in pairs(racoons) do
         local x, y = racoon.body:getPosition()
-        love.graphics.circle('line', x, y, racoon.shape:getRadius())
-        love.graphics.line(x, y, x + racoon.dir * 50, y + 60)
+        -- love.graphics.circle('line', x, y, racoon.shape:getRadius())
+        -- love.graphics.line(x, y, x + racoon.dir * 50, y + 60)
         if racoon.claws then
             love.graphics.setColor(255, 0, 0)
             love.graphics.line(unpack(racoon.claws))
@@ -506,8 +624,8 @@ function love.draw()
     -- frog
     local x, y = frog.body:getPosition()
     love.graphics.draw(frog.img, x, y, 0, frog.dir, frog.sy, frog.ox, frog.oy)
-    love.graphics.setColor(0, 255, 0)
-    love.graphics.circle('line', x, y, frog.shape:getRadius())
+    -- love.graphics.setColor(0, 255, 0)
+    -- love.graphics.circle('line', x, y, frog.shape:getRadius())
 
 
     -- ground
@@ -524,9 +642,18 @@ function love.draw()
         love.graphics.draw(splash)
     end
 
-    love.graphics.setColor(0, 0, 0)
-    for i, b in pairs(boundaries) do
-        local x, y = b.body:getPosition()
-        love.graphics.polygon('line', x, y, b.body:getWorldPoints(b.shape:getPoints()))
+    -- love.graphics.setColor(0, 0, 0)
+    -- for i, b in pairs(boundaries) do
+    --     local x, y = b.body:getPosition()
+    --     love.graphics.polygon('line', x, y, b.body:getWorldPoints(b.shape:getPoints()))
+    -- end
+
+    love.graphics.pop()
+    local y = 20
+    love.graphics.setColor(255, 255, 255)
+    for type, val in pairs(score) do
+        love.graphics.print(string.format('%s: %d', type, val), 20, y)
+        y = y + 20
     end
+
 end
